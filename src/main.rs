@@ -129,7 +129,7 @@ fn run_app<B: Backend>(
                         state.chagen_mode(InputMode::List);
                     }
                     KeyCode::Insert => {
-                        state.chagen_mode(InputMode::Username);
+                        state.chagen_mode(InputMode::Title);
                     }
                     _ => {}
                 },
