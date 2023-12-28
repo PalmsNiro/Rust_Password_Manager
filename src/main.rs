@@ -10,6 +10,7 @@ use crossterm::terminal::{
 use crossterm::{event, execute};
 // use rusqlite::ErrorCode;
 use std::error::Error;
+use std::fmt::format;
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
@@ -17,9 +18,8 @@ use tui::text::Span;
 use tui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use tui::{Frame, Terminal};
 
-
-
-//Aufgehört bei Minute 25:45
+//Aufgehört bei Minute 35:50
+//
 
 const APP_KEYS_DESC: &str = r#"
 L:           List
@@ -28,7 +28,7 @@ P:           On list, It's copy the Password
 D:           On list, It's Delete
 E:           On list, It's Edit
 S:           Search
-Insert Btn:  Insert new Password
+I:           Insert new Password
 Tab:         Go to next field
 Shift+Tab:   Go to previous filed
 Esc:         Exit insert mode
@@ -44,10 +44,11 @@ enum InputMode {
     List,
 }
 
+#[derive(Clone)]
 struct Password {
     title: String,
     username: String,
-    üassword: String,
+    password: String,
 }
 
 struct PassMng {
@@ -74,14 +75,34 @@ impl PassMng {
         }
     }
 
-    pub fn chagen_mode(&mut self, mode: InputMode) {
+    pub fn change_mode(&mut self, mode: InputMode) {
         self.mode = mode;
     }
 
-    pub fn clear_field(&mut self) {
+    pub fn clear_fields(&mut self) {
         self.new_title.clear();
         self.new_username.clear();
         self.new_password.clear();
+    }
+
+    pub fn insert(&mut self) {
+        let password = Password {
+            title: self.new_title.to_owned(),
+            username: self.new_username.to_owned(),
+            password: self.new_password.to_owned(),
+        };
+        self.passwords.push(password);
+        self.clear_fields();
+        self.change_mode(InputMode::Normal);
+    }
+
+    pub fn search(&mut self) {
+        self.search_list = self
+            .passwords
+            .clone()
+            .into_iter()
+            .filter(|item| item.title.starts_with(&self.search_txt.to_owned()))
+            .collect();
     }
 }
 
@@ -123,21 +144,21 @@ fn run_app<B: Backend>(
                         return Ok(());
                     }
                     KeyCode::Char('s') => {
-                        state.chagen_mode(InputMode::Search);
+                        state.change_mode(InputMode::Search);
                     }
                     KeyCode::Char('l') => {
-                        state.chagen_mode(InputMode::List);
+                        state.change_mode(InputMode::List);
                     }
-                    KeyCode::Insert => {
-                        state.chagen_mode(InputMode::Title);
+                    KeyCode::Char('i') => {
+                        state.change_mode(InputMode::Title);
                     }
                     _ => {}
                 },
 
                 InputMode::Title => match key.code {
                     KeyCode::Esc => {
-                        state.clear_field();
-                        state.chagen_mode(InputMode::Normal);
+                        state.clear_fields();
+                        state.change_mode(InputMode::Normal);
                     }
                     KeyCode::Char(c) => {
                         state.new_title.push(c);
@@ -147,14 +168,14 @@ fn run_app<B: Backend>(
                     }
 
                     KeyCode::Tab => {
-                        state.chagen_mode(InputMode::Username);
+                        state.change_mode(InputMode::Username);
                     }
                     _ => {}
                 },
                 InputMode::Username => match key.code {
                     KeyCode::Esc => {
-                        state.clear_field();
-                        state.chagen_mode(InputMode::Normal);
+                        state.clear_fields();
+                        state.change_mode(InputMode::Normal);
                     }
                     KeyCode::Char(c) => {
                         state.new_username.push(c);
@@ -163,17 +184,17 @@ fn run_app<B: Backend>(
                         state.new_username.pop();
                     }
                     KeyCode::Tab => {
-                        state.chagen_mode(InputMode::Password);
+                        state.change_mode(InputMode::Password);
                     }
                     KeyCode::BackTab => {
-                        state.chagen_mode(InputMode::Title);
+                        state.change_mode(InputMode::Title);
                     }
                     _ => {}
                 },
                 InputMode::Password => match key.code {
                     KeyCode::Esc => {
-                        state.clear_field();
-                        state.chagen_mode(InputMode::Normal);
+                        state.clear_fields();
+                        state.change_mode(InputMode::Normal);
                     }
                     KeyCode::Char(c) => {
                         state.new_password.push(c);
@@ -182,38 +203,43 @@ fn run_app<B: Backend>(
                         state.new_password.pop();
                     }
                     KeyCode::Tab => {
-                        state.chagen_mode(InputMode::Submit);
+                        state.change_mode(InputMode::Submit);
                     }
                     KeyCode::BackTab => {
-                        state.chagen_mode(InputMode::Username);
+                        state.change_mode(InputMode::Username);
                     }
                     _ => {}
                 },
                 InputMode::Submit => match key.code {
                     KeyCode::Esc => {
-                        state.clear_field();
-                        state.chagen_mode(InputMode::Normal);
+                        state.clear_fields();
+                        state.change_mode(InputMode::Normal);
                     }
                     KeyCode::BackTab => {
-                        state.chagen_mode(InputMode::Password);
+                        state.change_mode(InputMode::Password);
+                    }
+                    KeyCode::Enter => {
+                        state.insert();
                     }
                     _ => {}
                 },
                 InputMode::Search => match key.code {
                     KeyCode::Esc => {
-                        state.chagen_mode(InputMode::Normal);
+                        state.change_mode(InputMode::Normal);
                     }
                     KeyCode::Char(c) => {
                         state.search_txt.push(c);
+                        state.search();
                     }
                     KeyCode::Backspace => {
                         state.search_txt.pop();
+                        state.search();
                     }
                     _ => {}
                 },
                 InputMode::List => match key.code {
                     KeyCode::Esc => {
-                        state.chagen_mode(InputMode::Normal);
+                        state.change_mode(InputMode::Normal);
                     }
                     _ => {}
                 },
@@ -240,6 +266,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, state: &mut PassMng) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
     f.render_widget(list_section_block, parent_chunk[1]);
+    list_section(f, state, parent_chunk[1]);
 }
 
 fn new_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
@@ -320,4 +347,47 @@ fn new_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
     f.render_widget(submit_btn, new_section_chunk[4]);
 }
 
-fn list_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng) {}
+fn list_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
+    let list_to_show = if state.search_list.is_empty() {
+        state.passwords.to_owned()
+    } else {
+        state.search_list.to_owned()
+    };
+    let items: Vec<ListItem> = list_to_show
+        .into_iter()
+        .map(|item| match state.mode {
+            InputMode::List => ListItem::new(format!(
+                "{}: {} - {}",
+                item.title.to_owned(),
+                item.username.to_owned(),
+                item.password.to_owned()
+            )),
+            _ => ListItem::new(Span::from(item.title)),
+        })
+        .collect();
+
+    let list_chunks = Layout::default()
+        .margin(2)
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
+        .split(area);
+
+    let search_input = Paragraph::new(state.search_txt.to_owned())
+        .block(
+            Block::default()
+                .title("Search")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded),
+        )
+        .style(match state.mode {
+            InputMode::Search => Style::default().fg(Color::Yellow),
+            _ => Style::default(),
+        });
+    f.render_widget(search_input, list_chunks[0]);
+
+    let list = List::new(items)
+        .block(Block::default())
+        .highlight_symbol("->")
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    f.render_stateful_widget(list, list_chunks[1], &mut state.list_state);
+}
