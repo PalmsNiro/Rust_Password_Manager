@@ -9,4 +9,6 @@ edition = "2021"
 tui = "0.19"
 crossterm = "0.27.0" # terminal back-end
 arboard = "3.2.1"
-# rusqlite = "0.29.0"
+rusqlite = {version="0.31.0", features = ["bundled-sqlcipher"]}
+dirs = "5.0"
+rpassword = "7.2.0"     # Password input library

@@ -1,4 +1,4 @@
-// mod db;
+mod db;
 
 // use crate::db::Database;
 use arboard::Clipboard;
@@ -18,8 +18,10 @@ use tui::text::Span;
 use tui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use tui::{Frame, Terminal};
 
-//Aufgehört bei Minute 35:50
-//
+use crate::db::Database;
+
+//Passphrase wird beim ersten mal fragen festgelegt und gespeichert mit der erstellung der Datenbank
+//Um diesen zu resetten muss die Datenbank gelöscht werden
 
 const APP_KEYS_DESC: &str = r#"
 L:           List
@@ -42,13 +44,34 @@ enum InputMode {
     Submit,
     Search,
     List,
+    Delete,
 }
 
 #[derive(Clone)]
 struct Password {
+    id: usize,
     title: String,
     username: String,
     password: String,
+}
+impl Password {
+    pub fn new(title: String, username: String, password: String) -> Password {
+        Password {
+            id: 0,
+            title,
+            username,
+            password,
+        }
+    }
+
+    pub fn new_with_id(id: usize, title: String, username: String, password: String) -> Password {
+        Password {
+            id,
+            title,
+            username,
+            password,
+        }
+    }
 }
 
 struct PassMng {
@@ -60,18 +83,29 @@ struct PassMng {
     new_title: String,
     new_username: String,
     new_password: String,
+    db: Database,
 }
 impl PassMng {
-    pub fn new() -> PassMng {
+    pub fn new(key: String) -> PassMng {
+        let db = match Database::new(key) {
+            Ok(db) => db,
+            Err(e) => {
+                println!("no uhuh");
+                println!("{}", e.to_string());
+                std::process::exit(1);
+            }
+        };
+        let passwords = db.load();
         PassMng {
             mode: InputMode::Normal,
             list_state: ListState::default(),
-            passwords: vec![],
+            passwords,
             search_txt: String::new(),
             search_list: vec![],
             new_title: String::new(),
             new_username: String::new(),
             new_password: String::new(),
+            db,
         }
     }
 
@@ -87,10 +121,12 @@ impl PassMng {
 
     pub fn insert(&mut self) {
         let password = Password {
+            id: 32,
             title: self.new_title.to_owned(),
             username: self.new_username.to_owned(),
             password: self.new_password.to_owned(),
         };
+        self.db.insert_password(&password);
         self.passwords.push(password);
         self.clear_fields();
         self.change_mode(InputMode::Normal);
@@ -104,10 +140,67 @@ impl PassMng {
             .filter(|item| item.title.starts_with(&self.search_txt.to_owned()))
             .collect();
     }
+
+    pub fn edit(&mut self) {}
+
+    pub fn copy_username(&mut self) {
+        if let Some(index) = self.list_state.selected() {
+            let username = &self.passwords[index].username;
+            let mut clipboard = Clipboard::new().unwrap();
+            clipboard.set_text(username).unwrap();
+        };
+    }
+
+    pub fn copy_password(&mut self) {
+        if let Some(index) = self.list_state.selected() {
+            let password = &self.passwords[index].password;
+            let mut clipboard = Clipboard::new().unwrap();
+            clipboard.set_text(password).unwrap();
+        };
+    }
+
+    pub fn move_up(&mut self) {
+        let selected = match self.list_state.selected() {
+            Some(v) => {
+                if v == 0 {
+                    Some(v)
+                } else {
+                    Some(v - 1)
+                }
+            }
+            None => Some(0),
+        };
+        self.list_state.select(selected);
+    }
+
+    pub fn move_down(&mut self) {
+        let selected = match self.list_state.selected() {
+            Some(v) => {
+                if v == self.passwords.len() - 1 {
+                    Some(v)
+                } else {
+                    Some(v + 1)
+                }
+            }
+            None => Some(0),
+        };
+        self.list_state.select(selected);
+    }
+
+    pub fn delete_password(&mut self) {
+        if let Some(index) = self.list_state.selected() {
+            let id = self.passwords[index].id;
+            self.db.delete_pw(id);
+            self.passwords.remove(index);
+            self.list_state.select(None);
+        };
+    }
+
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut state = PassMng::new();
+    let passphrase = rpassword::prompt_password("Passwort zum entsperren: ").unwrap();
+    let mut state = PassMng::new(passphrase);
 
     enable_raw_mode()?;
     execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
@@ -235,12 +328,46 @@ fn run_app<B: Backend>(
                         state.search_txt.pop();
                         state.search();
                     }
+                    KeyCode::Down => {
+                        state.change_mode(InputMode::List);
+                    }
+                    KeyCode::Tab => state.change_mode(InputMode::List),
+                    KeyCode::BackTab => state.change_mode(InputMode::List),
                     _ => {}
                 },
                 InputMode::List => match key.code {
                     KeyCode::Esc => {
                         state.change_mode(InputMode::Normal);
                     }
+                    KeyCode::BackTab => state.change_mode(InputMode::Search),
+                    KeyCode::Up => {
+                        state.move_up();
+                    }
+                    KeyCode::Down => {
+                        state.move_down();
+                    }
+                    KeyCode::Char('u') => {
+                        //Copy Username
+                        state.copy_username();
+                    }
+                    KeyCode::Char('p') => {
+                        //Copy Username
+                        state.copy_password();
+                    }
+                    KeyCode::Char('e') => {
+                        state.edit();
+                    }
+                    KeyCode::Char('d') => {
+                        state.change_mode(InputMode::Delete);
+                    }
+                    _ => {}
+                },
+                InputMode::Delete => match key.code {
+                    KeyCode::Char('y') => {
+                        state.delete_password();
+                        state.change_mode(InputMode::List);
+                    }
+                    KeyCode::Char('n') => todo!(),
                     _ => {}
                 },
             }
@@ -248,12 +375,14 @@ fn run_app<B: Backend>(
     }
 }
 
+//fertig
 fn ui<B: Backend>(f: &mut Frame<B>, state: &mut PassMng) {
     let parent_chunk = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
         .split(f.size());
 
+    //Linker Block für Input und Beschreibung
     let new_section_block = Block::default()
         .title("New Password")
         .borders(Borders::ALL)
@@ -261,14 +390,18 @@ fn ui<B: Backend>(f: &mut Frame<B>, state: &mut PassMng) {
     f.render_widget(new_section_block, parent_chunk[0]);
     new_section(f, state, parent_chunk[0]);
 
+    //Rechter Block für die Passwort Liste
     let list_section_block = Block::default()
         .title("List of Passwords")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
     f.render_widget(list_section_block, parent_chunk[1]);
     list_section(f, state, parent_chunk[1]);
+
+    delete_popup(f, state);
 }
 
+//fertig
 fn new_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
     let new_section_chunk = Layout::default()
         .margin(2)
@@ -347,6 +480,7 @@ fn new_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
     f.render_widget(submit_btn, new_section_chunk[4]);
 }
 
+//fertig
 fn list_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
     let list_to_show = if state.search_list.is_empty() {
         state.passwords.to_owned()
@@ -388,6 +522,68 @@ fn list_section<B: Backend>(f: &mut Frame<B>, state: &mut PassMng, area: Rect) {
     let list = List::new(items)
         .block(Block::default())
         .highlight_symbol("->")
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_stateful_widget(list, list_chunks[1], &mut state.list_state);
+}
+
+fn delete_popup<B: Backend>(f: &mut Frame<B>, state: &mut PassMng) {
+    if let InputMode::Delete = state.mode {
+        let block = Block::default()
+            .title("DELETE")
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded);
+        let area = centered_rect(60, 25, f.size());
+        f.render_widget(Clear, area); //this clears out the background
+        f.render_widget(block, area);
+
+        let chunk = Layout::default()
+            .margin(2)
+            .constraints(
+                [
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                ].as_ref()
+            )
+            .split(area);
+
+        let text = Paragraph::new("Are you sure?")
+            .style(Style::default().fg(Color::Red))
+            .alignment(Alignment::Center);
+        f.render_widget(text, chunk[0]);
+
+        let keys_desc = Paragraph::new("Press (Y) for Yes and (N) for No")
+            .alignment(Alignment::Center);
+        f.render_widget(keys_desc, chunk[1]);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+                .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+                .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }
